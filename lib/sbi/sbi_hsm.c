@@ -11,6 +11,7 @@
 #include <sbi/riscv_barrier.h>
 #include <sbi/riscv_encoding.h>
 #include <sbi/riscv_atomic.h>
+#include <sbi/riscv_mpt.h>
 #include <sbi/sbi_bitops.h>
 #include <sbi/sbi_console.h>
 #include <sbi/sbi_domain.h>
@@ -142,6 +143,7 @@ void __noreturn sbi_hsm_hart_start_finish(struct sbi_scratch *scratch,
 	unsigned long next_arg1;
 	unsigned long next_addr;
 	unsigned long next_mode;
+	int rc;
 	struct sbi_hsm_data *hdata = sbi_scratch_offset_ptr(scratch,
 							    hart_data_offset);
 
@@ -153,6 +155,13 @@ void __noreturn sbi_hsm_hart_start_finish(struct sbi_scratch *scratch,
 	next_addr = scratch->next_addr;
 	next_mode = scratch->next_mode;
 	hsm_start_ticket_release(hdata);
+
+	/**
+	 * Smmpt activate MPT for this hart's domain before entering S-mode.
+	 */
+	rc = sbi_mpt_hart_activate_for_domain(sbi_domain_thishart_ptr());
+	if (rc != 0 && rc != SBI_ENODEV)
+		sbi_hart_hang();
 
 	sbi_hart_switch_mode(hartid, next_arg1, next_addr, next_mode, false);
 }
@@ -464,6 +473,7 @@ void sbi_hsm_hart_resume_start(struct sbi_scratch *scratch)
 void __noreturn sbi_hsm_hart_resume_finish(struct sbi_scratch *scratch,
 					   u32 hartid)
 {
+	int rc;
 	struct sbi_hsm_data *hdata = sbi_scratch_offset_ptr(scratch,
 							    hart_data_offset);
 
@@ -477,6 +487,15 @@ void __noreturn sbi_hsm_hart_resume_finish(struct sbi_scratch *scratch,
 	 * the warm-boot sequence.
 	 */
 	__sbi_hsm_suspend_non_ret_restore(scratch);
+
+	/*
+	 * Smmpt: re-activate MPT after returning from non-retentive suspend.
+	 * The mmpt CSR was cleared when the hart powered down. Restore it
+	 * to the domain's root table before re-entering S-mode.
+	 */
+	rc = sbi_mpt_hart_activate_for_domain(sbi_domain_thishart_ptr());
+	if (rc != 0 && rc != SBI_ENODEV)
+		sbi_hart_hang();
 
 	sbi_hart_switch_mode(hartid, scratch->next_arg1,
 			     scratch->next_addr,

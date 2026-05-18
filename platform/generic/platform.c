@@ -10,6 +10,7 @@
 #include <libfdt.h>
 #include <platform_override.h>
 #include <sbi/riscv_asm.h>
+#include <sbi/riscv_mpt.h>
 #include <sbi/sbi_bitops.h>
 #include <sbi/sbi_hartmask.h>
 #include <sbi/sbi_heap.h>
@@ -37,7 +38,7 @@ static u32 fw_platform_calculate_heap_size(u32 hart_count)
 {
 	u32 heap_size;
 
-	heap_size = SBI_PLATFORM_DEFAULT_HEAP_SIZE(hart_count);
+	heap_size = SBI_PLATFORM_DEFAULT_HEAP_SIZE(hart_count) + (128 * 1024);
 
 	/* For TLB fifo */
 	heap_size += SBI_TLB_INFO_SIZE * (hart_count) * (hart_count);
@@ -215,6 +216,62 @@ int generic_nascent_init(void)
 	return 0;
 }
 
+static int mpt_early_init(bool cold_boot)
+{
+	struct sbi_domain *dom, *root_dom;
+	struct sbi_mpt_domain_config cfg;
+	u32 sdid;
+	int rc;
+
+	if (!cold_boot)
+		return 0;
+
+	rc = sbi_mpt_init();
+	if (rc == SBI_ENODEV)
+		/* Non-fatal: platform works without SMMPT */
+		return 0;
+	if (rc)
+		return rc;
+
+	/**
+	 * Create the root domain
+	 */
+	cfg.sbi_dom =	sbi_domain_thishart_ptr();
+	cfg.xwr =	SBI_MPT_PERM_RWX;
+	cfg.fw_protect = true;
+	cfg.regions =	NULL;
+	cfg.nregions =	0;
+
+	rc = sbi_mpt_domain_create(&cfg, &sdid);
+	if (rc)
+		return rc;
+
+	sbi_memset(&cfg, 0, sizeof(cfg));
+	root_dom = sbi_domain_thishart_ptr();
+
+	/**
+	 * Create rest of the domains
+	 */
+	sbi_domain_for_each(dom) {
+		if (dom == root_dom)
+			continue;
+
+		cfg.sbi_dom = dom;
+		cfg.xwr = SBI_MPT_PERM_RWX;
+		cfg.fw_protect = false;
+		cfg.regions = NULL;
+		cfg.nregions = 0;
+		cfg.xwr = SBI_MPT_PERM_RWX;
+
+		rc = sbi_mpt_domain_create(&cfg, &sdid);
+		if (rc) {
+			return rc;
+		}
+	}
+
+	return 0;
+}
+
 int generic_early_init(bool cold_boot)
 {
 	const void *fdt = fdt_get_address();
@@ -231,7 +288,16 @@ int generic_early_init(bool cold_boot)
 		fdt_driver_init_all(fdt, fdt_early_drivers);
 	}
 
-	return fdt_cmo_init(cold_boot);
+	rc = fdt_cmo_init(cold_boot);
+	if (rc)
+		return rc;
+
+	rc = mpt_early_init(cold_boot);
+	if (rc)
+		return rc;
+
+	return 0;
+
 }
 
 int generic_final_init(bool cold_boot)
