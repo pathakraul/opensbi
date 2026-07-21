@@ -17,6 +17,9 @@
 #include <sbi/sbi_string.h>
 #include <sbi/sbi_system.h>
 #include <sbi/sbi_tlb.h>
+#include <sbi/sbi_mpt.h>
+#include <sbi/sbi_domain.h>
+#include <sbi/sbi_console.h>
 #include <sbi_utils/cache/fdt_cmo_helper.h>
 #include <sbi_utils/fdt/fdt_domain.h>
 #include <sbi_utils/fdt/fdt_driver.h>
@@ -33,6 +36,86 @@
 /* List of platform override modules generated at compile time */
 extern const struct fdt_driver *const platform_override_modules[];
 
+/*
+ * mpt_early_init(): Detects the SMMPT mode and initializes the
+ * structures (not MPT tables) requried to prepare MPT tables and
+ * domain programming.
+ */
+int mpt_early_init(bool cold_boot)
+{
+	int rc;
+
+	if (!cold_boot)
+		return 0;
+
+	rc = sbi_mpt_init();
+	if (rc == SBI_ENODEV)
+		return 0;
+
+	return rc;
+}
+
+/*
+ * mpt_final_init(): Performs the final initialzation including
+ * creation of Root supervisor domain.
+ */
+int mpt_final_init(bool cold_boot)
+{
+	int rc;
+	u32 sdid;
+	struct sbi_domain *dom, *root_dom;
+	struct sbi_mpt_domain_config cfg;
+
+	if (!cold_boot)
+		return 0;
+
+	/* SMMPT may be unavailable */
+	if (!sbi_mpt_ctrl_get()->ready)
+		return 0;
+
+	/*
+	 * Create MPT domain for Root domain.
+	 *
+	 * Root domain maps all physical memory so the
+	 * firmware region must be explicitly denied to S-mode.
+	 *
+	 * regions pointer is NULL and nregions is 0 since there
+	 * are no other regions other than respective SBI domain for mapping.
+	 */
+	root_dom = sbi_domain_thishart_ptr();
+	cfg.sbi_dom = root_dom;
+	cfg.xwr = SBI_MPT_PERM_RWX;
+	cfg.fw_protect = true;
+	cfg.regions = NULL;
+	cfg.nregions = 0;
+
+	rc = sbi_mpt_domain_create(&cfg, &sdid);
+	if (rc) {
+		sbi_printf("mpt: Root domain create failed rc=%d\n", rc);
+		return rc;
+	}
+
+	sbi_memset(&cfg, 0, sizeof(cfg));
+
+	/* Create MPT domain for all other registered SBI domains. */
+	sbi_domain_for_each(dom) {
+		if (dom == root_dom)
+			continue;
+
+		cfg.sbi_dom = dom;
+		cfg.xwr = SBI_MPT_PERM_RWX;
+		cfg.fw_protect = false;
+		cfg.regions = NULL;
+		cfg.nregions = 0;
+
+		rc = sbi_mpt_domain_create(&cfg, &sdid);
+		if (rc)
+			sbi_printf("mpt: domain '%s' failed rc=%d\n", dom->name, rc);
+	}
+
+	return 0;
+}
+
 static u32 fw_platform_calculate_heap_size(u32 hart_count)
 {
 	u32 heap_size;
@@ -41,6 +124,15 @@ static u32 fw_platform_calculate_heap_size(u32 hart_count)
 
 	/* For TLB fifo */
 	heap_size += SBI_TLB_INFO_SIZE * (hart_count) * (hart_count);
+
+	/*
+	 * MPT table budget
+	 * 1 MiB memory for MPT allocated currently.
+	 *
+	 * TODO: Need better way to get the memory budget based on active
+	 * SMMPT mode.
+	 */
+	heap_size += 1024 * 1024;
 
 	return BIT_ALIGN(heap_size, HEAP_BASE_ALIGN);
 }
@@ -229,6 +321,10 @@ int generic_early_init(bool cold_boot)
 			return rc;
 
 		fdt_driver_init_all(fdt, fdt_early_drivers);
+
+		rc = mpt_early_init(cold_boot);
+		if (rc)
+			return rc;
 	}
 
 	return fdt_cmo_init(cold_boot);
@@ -236,10 +332,15 @@ int generic_early_init(bool cold_boot)
 
 int generic_final_init(bool cold_boot)
 {
+	int rc;
 	void *fdt = fdt_get_address_rw();
 
 	if (!cold_boot)
 		return 0;
+
+	rc = mpt_final_init(cold_boot);
+	if (rc)
+		return rc;
 
 	fdt_cpu_fixup(fdt);
 	fdt_fixups(fdt);
