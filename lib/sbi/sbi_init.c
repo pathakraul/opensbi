@@ -35,6 +35,7 @@
 #include <sbi/sbi_tlb.h>
 #include <sbi/sbi_version.h>
 #include <sbi/sbi_unit_test.h>
+#include <sbi/sbi_mpt.h>
 
 #define BANNER                                              \
 	"   ____                    _____ ____ _____\n"     \
@@ -162,6 +163,9 @@ static void sbi_boot_print_domains(struct sbi_scratch *scratch)
 
 	/* Domain details */
 	sbi_domain_dump_all("        ");
+
+	/* Print Supervisor Domains */
+	sbi_mpt_dump();
 }
 
 static void sbi_boot_print_hart(struct sbi_scratch *scratch, u32 hartid)
