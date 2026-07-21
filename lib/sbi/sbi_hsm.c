@@ -25,6 +25,7 @@
 #include <sbi/sbi_system.h>
 #include <sbi/sbi_timer.h>
 #include <sbi/sbi_console.h>
+#include <sbi/sbi_mpt.h>
 
 #define __sbi_hsm_hart_change_state(hdata, oldstate, newstate)		\
 ({									\
@@ -153,6 +154,9 @@ void __noreturn sbi_hsm_hart_start_finish(struct sbi_scratch *scratch,
 	next_addr = scratch->next_addr;
 	next_mode = scratch->next_mode;
 	hsm_start_ticket_release(hdata);
+
+	/* Program hart mmpt for its supervisor domain before entering S-mode. */
+	sbi_mpt_hart_activate_for_domain(sbi_domain_thishart_ptr());
 
 	sbi_hart_switch_mode(hartid, next_arg1, next_addr, next_mode, false);
 }
@@ -477,6 +481,9 @@ void __noreturn sbi_hsm_hart_resume_finish(struct sbi_scratch *scratch,
 	 * the warm-boot sequence.
 	 */
 	__sbi_hsm_suspend_non_ret_restore(scratch);
+
+	/* Reprogram mmpt on the a resumed hart */
+	sbi_mpt_hart_activate_for_domain(sbi_domain_thishart_ptr());
 
 	sbi_hart_switch_mode(hartid, scratch->next_arg1,
 			     scratch->next_addr,
