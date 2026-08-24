@@ -16,6 +16,7 @@
 #include <sbi/sbi_csr_detect.h>
 #include <sbi/sbi_error.h>
 #include <sbi/sbi_hart.h>
+#include <sbi/sbi_hart_mpt.h>
 #include <sbi/sbi_hart_pmp.h>
 #include <sbi/sbi_platform.h>
 #include <sbi/sbi_pmu.h>
@@ -730,6 +731,11 @@ int sbi_hart_init(struct sbi_scratch *scratch, bool cold_boot)
 	if (cold_boot) {
 		rc = sbi_hart_pmp_init(scratch);
 		if (rc)
+			return rc;
+
+		/* Smmpt is optional. Continue if the Smmpt is not present. */
+		rc = sbi_mpt_init();
+		if (rc && rc != SBI_ENODEV)
 			return rc;
 	}
 

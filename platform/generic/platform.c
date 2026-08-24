@@ -30,6 +30,8 @@
 #include <sbi_utils/serial/semihosting.h>
 #include <sbi_utils/timer/fdt_timer.h>
 
+#define SBI_PLATFORM_MPT_HEAP		1048576		/* 1 MiB */
+
 /* List of platform override modules generated at compile time */
 extern const struct fdt_driver *const platform_override_modules[];
 
@@ -41,6 +43,15 @@ static u32 fw_platform_calculate_heap_size(u32 hart_count)
 
 	/* For TLB fifo */
 	heap_size += SBI_TLB_INFO_SIZE * (hart_count) * (hart_count);
+
+	/*
+	 * MPT table budget
+	 * 1 MiB memory for MPT allocated currently.
+	 *
+	 * TODO: Need better way to get the memory budget based on active
+	 * SMMPT mode.
+	 */
+	heap_size += SBI_PLATFORM_MPT_HEAP;
 
 	return BIT_ALIGN(heap_size, HEAP_BASE_ALIGN);
 }
