@@ -35,7 +35,65 @@ struct sbi_domain root = {
 	.fw_region_inited = false,
 };
 
+struct sbi_domain_notifier_entry {
+       struct sbi_dlist        node;
+       sbi_domain_notifier_fn  fn;
+       void                   *priv;
+};
+
+
 static unsigned long domain_hart_ptr_offset;
+static SBI_LIST_HEAD(domain_notifier_list);
+
+int sbi_domain_register_notifier(sbi_domain_notifier_fn notifier, void *priv)
+{
+	struct sbi_domain_notifier_entry *entry;
+
+	if (!notifier)
+		return SBI_EINVAL;
+
+	sbi_list_for_each_entry(entry, &domain_notifier_list, node) {
+		if (entry->fn == notifier && entry->priv == priv)
+			return SBI_OK;
+	}
+
+	entry = sbi_zalloc(sizeof(*entry));
+	if (!entry)
+		return SBI_ENOMEM;
+
+	entry->fn   = notifier;
+	entry->priv = priv;
+	sbi_list_add_tail(&entry->node, &domain_notifier_list);
+	return SBI_OK;
+}
+
+int sbi_domain_unregister_notifier(sbi_domain_notifier_fn notifier, void *priv)
+{
+	struct sbi_domain_notifier_entry *entry, *tmp;
+
+	if (!notifier)
+		return SBI_EINVAL;
+
+	sbi_list_for_each_entry_safe(entry, tmp, &domain_notifier_list, node) {
+		if (entry->fn == notifier && entry->priv == priv) {
+			sbi_list_del(&entry->node);
+			sbi_free(entry);
+			return SBI_OK;
+		}
+	}
+
+	return SBI_ENODEV;
+}
+
+void sbi_domain_notify_all(const struct sbi_domain *dom)
+{
+	struct sbi_domain_notifier_entry *entry;
+
+	sbi_list_for_each_entry(entry, &domain_notifier_list, node) {
+		if (entry->fn)
+			entry->fn(dom, entry->priv);
+	}
+}
 
 struct sbi_domain *sbi_hartindex_to_domain(u32 hartindex)
 {
@@ -643,6 +701,7 @@ int sbi_domain_register(struct sbi_domain *dom,
 			return SBI_EALREADY;
 	}
 
+	sbi_domain_notify_all(dom);
 	/* Sanitize discovered domain */
 	rc = sanitize_domain(dom);
 	if (rc) {

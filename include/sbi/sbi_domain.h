@@ -358,4 +358,14 @@ int sbi_domain_finalize(struct sbi_scratch *scratch);
 /** Initialize domains */
 int sbi_domain_init(struct sbi_scratch *scratch, u32 cold_hartid);
 
+/** Notifier callback */
+typedef void (*sbi_domain_notifier_fn)(const struct sbi_domain *dom,
+                                      void *priv);
+
+/** Regitser domain notifier */
+int sbi_domain_register_notifier(sbi_domain_notifier_fn notifier, void *priv);
+
+/** Unregitser domain notifier */
+int sbi_domain_unregister_notifier(sbi_domain_notifier_fn notifier, void *priv);
+
 #endif
