@@ -42,8 +42,15 @@ struct sbi_domain_notifier_entry {
 };
 
 
+struct sbi_domain_finalize_notifier_entry {
+	struct sbi_dlist			node;
+	sbi_domain_finalize_notifier_fn		fn;
+	void					*priv;
+};
+
 static unsigned long domain_hart_ptr_offset;
 static SBI_LIST_HEAD(domain_notifier_list);
+static SBI_LIST_HEAD(domain_finalize_notifier_list);
 
 int sbi_domain_register_notifier(sbi_domain_notifier_fn notifier, void *priv)
 {
@@ -93,6 +100,67 @@ void sbi_domain_notify_all(const struct sbi_domain *dom)
 		if (entry->fn)
 			entry->fn(dom, entry->priv);
 	}
+}
+
+int sbi_domain_register_finalize_notifier(sbi_domain_finalize_notifier_fn notifier, void *priv)
+{
+	struct sbi_domain_finalize_notifier_entry *entry;
+
+	if (!notifier)
+		return SBI_EINVAL;
+
+	sbi_list_for_each_entry(entry, &domain_finalize_notifier_list, node) {
+		if (entry->fn == notifier && entry->priv == priv)
+			return SBI_OK;
+	}
+
+	entry = sbi_zalloc(sizeof(*entry));
+	if (!entry)
+		return SBI_ENOMEM;
+
+	entry->fn = notifier;
+	entry->priv = priv;
+	sbi_list_add_tail(&entry->node, &domain_finalize_notifier_list);
+
+	return SBI_OK;
+}
+
+int sbi_domain_unregister_finalize_notifier(sbi_domain_finalize_notifier_fn notifier, void *priv)
+{
+	struct sbi_domain_finalize_notifier_entry *entry, *tmp;
+
+	if (!notifier)
+		return SBI_EINVAL;
+
+	sbi_list_for_each_entry_safe(entry, tmp, &domain_finalize_notifier_list, node) {
+		if (entry->fn == notifier && entry->priv == priv) {
+			sbi_list_del(&entry->node);
+			sbi_free(entry);
+			return SBI_OK;
+		}
+	}
+
+	return SBI_ENODEV;
+}
+
+static int sbi_domain_notify_finalize_all(void)
+{
+	struct sbi_domain_finalize_notifier_entry *entry;
+	struct sbi_domain *dom;
+	int rc;
+
+	sbi_list_for_each_entry(entry, &domain_finalize_notifier_list, node) {
+		if (!entry->fn)
+			continue;
+
+		sbi_domain_for_each(dom) {
+			rc = entry->fn(dom, entry->priv);
+			if (rc)
+				return rc;
+		}
+	}
+
+	return 0;
 }
 
 struct sbi_domain *sbi_hartindex_to_domain(u32 hartindex)
@@ -923,6 +991,18 @@ int sbi_domain_finalize(struct sbi_scratch *scratch)
 	 * regions can't be changed.
 	 */
 	domain_finalized = true;
+
+	/*
+	 * All domains are registered and their memory regions are final
+	 * so notify the subsystems which derive per-domain configuration
+	 * from the domain memory regions.
+	 */
+	rc = sbi_domain_notify_finalize_all();
+	if (rc) {
+		sbi_printf("%s: domain finalize notifier failed (error %d)\n",
+			   __func__, rc);
+		return rc;
+	}
 
 	return 0;
 }

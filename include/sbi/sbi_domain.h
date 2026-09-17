@@ -362,10 +362,26 @@ int sbi_domain_init(struct sbi_scratch *scratch, u32 cold_hartid);
 typedef void (*sbi_domain_notifier_fn)(const struct sbi_domain *dom,
                                       void *priv);
 
+/**
+ * Domain finalize notifier callback
+ *
+ * Invoked from sbi_domain_finalize  function after every domain gets
+ * registered and memory regions of all domains are finalized.
+ */
+typedef int (*sbi_domain_finalize_notifier_fn)(struct sbi_domain *dom, void *priv);
+
 /** Regitser domain notifier */
 int sbi_domain_register_notifier(sbi_domain_notifier_fn notifier, void *priv);
 
 /** Unregitser domain notifier */
 int sbi_domain_unregister_notifier(sbi_domain_notifier_fn notifier, void *priv);
+
+/** Register domain finalize notifier */
+int sbi_domain_register_finalize_notifier(sbi_domain_finalize_notifier_fn notifier,
+					  void *priv);
+
+/** Unregister domain finalize notifier */
+int sbi_domain_unregister_finalize_notifier(sbi_domain_finalize_notifier_fn notifier,
+					    void *priv);
 
 #endif
