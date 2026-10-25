@@ -562,8 +562,14 @@ static struct mbox_chan *rpmi_shmem_mbox_request_chan(
 		ret = smq_base_get_two_u32(mctl,
 					   RPMI_BASE_SRV_PROBE_SERVICE_GROUP,
 					   chan_args, tval);
-		if (ret || !tval[1])
+		/*
+		 * The service group version must not be greater than the
+		 * RPMI specification version implemented by the platform
+		 * microcontroller.
+		 */
+		if (ret || !tval[1] || tval[1] > mctl->spec_version)
 			return NULL;
+
 	}
 
 	srvgrp_chan = sbi_zalloc(sizeof(*srvgrp_chan));
@@ -773,8 +779,14 @@ static int rpmi_shmem_mbox_init(const void *fdt, int nodeoff,
 	if (ret)
 		goto fail_free_chan;
 	mctl->spec_version = tval[1];
+
+	/*
+	 * Spec version must not be lower than the Base service group
+	 * version. Spec allows the group version lower then the spec
+	 * version which is implemented by the platform microcontroller.
+	 */
 	if (mctl->spec_version < RPMI_BASE_VERSION_MIN ||
-	    mctl->spec_version != base_srvgrp->servicegroup_version) {
+	    base_srvgrp->servicegroup_version > mctl->spec_version) {
 		ret = SBI_EINVAL;
 		goto fail_free_chan;
 	}
